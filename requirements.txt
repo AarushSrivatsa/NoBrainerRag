@@ -1,0 +1,8 @@
+dotenv
+langchain-ollama
+langchain-pinecone
+langchain_core
+langchain_text_splitters
+langchain_community
+langchain_classic
+flashrank
