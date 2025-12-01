@@ -1,6 +1,6 @@
 [project]
 name = "NoBrainerRag"
-version = "0.1.1"
+version = "0.1.2"
 description = "A dead simple RAG pipeline with persistent memory and conversation namespaces."
 readme = "README.md"
 requires-python = ">=3.8"
