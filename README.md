@@ -10,19 +10,6 @@ A dead simple RAG (Retrieval-Augmented Generation) system that just works. Built
 - 🎯 **Smart Retrieval** - Recursive text splitting + built-in reranking for accurate results
 - ⚡ **Fast Setup** - Get running in under 5 minutes
 
-## Installation
-
-```bash
-pip install nobrainer-rag
-```
-
-Or clone and install:
-```bash
-git clone https://github.com/yourusername/nobrainer-rag.git
-cd nobrainer-rag
-pip install -e .
-```
-
 ## Prerequisites
 
 ### 1. Pinecone API Key (Required)
