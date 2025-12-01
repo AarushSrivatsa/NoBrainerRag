@@ -10,6 +10,7 @@ from langchain_classic.retrievers.contextual_compression import ContextualCompre
 from typing import Optional
 
 load_dotenv()
+
 EmbeddingModel = OllamaEmbeddings(model="nomic-embed-text:v1.5")
 pc = Pinecone()
 index_name = "chatbot-wrapper-project"
