@@ -1,5 +1,22 @@
-.venv/
-venv/
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Secrets
+*.env
 .env
+
+# Build outputs
+*.egg-info/
+dist/
+build/
+
+# OS junk
+.DS_Store

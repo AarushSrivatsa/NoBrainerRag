@@ -1,3 +1,4 @@
+[![PyPI version](https://img.shields.io/pypi/v/NoBrainerRag.svg)](https://pypi.org/project/NoBrainerRag/)
 # NoBrainer RAG
 
 A dead simple RAG (Retrieval-Augmented Generation) system that just works. Built for developers who want to add memory to their chatbots without overthinking it.
@@ -7,18 +8,72 @@ A dead simple RAG (Retrieval-Augmented Generation) system that just works. Built
 - 🚀 **Simple API** - Just 3 methods: insert, retrieve, delete
 - 🔒 **Conversation Isolation** - Each conversation gets its own namespace
 - 💾 **Persistent Memory** - Data survives even if your object doesn't
-- 🎯 **Smart Retrieval** - Recursive text splitting + built-in reranking for accurate results
+- 🎯 **Smart Retrieval** - RecursiveCharacterTextSplitter + FlashRank reranking built-in (no configuration needed)
 - ⚡ **Fast Setup** - Get running in under 5 minutes
+
+## Installation
+
+```bash
+pip install NoBrainerRag
+```
+
+Or clone and install:
+
+```bash
+git clone https://github.com/AarushSrivatsa/NoBrainerRag.git
+cd NoBrainerRag
+pip install -e .
+```
+
+---
+
+## What Makes This Actually Good
+
+Most RAG tutorials give you basic vector search and call it a day. NoBrainer comes with **production-grade features out of the box**:
+
+### 📊 RecursiveCharacterTextSplitter (Smart Chunking)
+
+Not your average "split every N characters" nonsense. This intelligently splits text by:
+1. Paragraphs first (`\n\n`)
+2. Then sentences (`.`)
+3. Then clauses (`,`)
+4. Finally words as a last resort
+
+**Why this matters:** Preserves semantic meaning. You don't get chunks that cut off mid-sentence or split important context.
+
+### 🎯 FlashRank Reranking (Better Results)
+
+Every single retrieval automatically:
+1. Gets 10 candidate chunks from Pinecone
+2. Runs them through FlashRank (`ms-marco-MiniLM-L-12-v2`)
+3. Returns only the top 4 most relevant
+
+**Why this matters:** Vector similarity isn't perfect. Reranking catches what embeddings miss, giving you the *actually* relevant results.
+
+### 🧠 Nomic Embeddings (No API Costs)
+
+Uses `nomic-embed-text:v1.5` - one of the best open-source embedding models. Runs locally via Ollama.
+
+**Why this matters:** No OpenAI bills. No rate limits. No data leaving your machine. And the quality is genuinely competitive with paid options.
+
+**You get all of this by default.** Zero configuration. Just install and go.
+
+---
 
 ## Prerequisites
 
-### 1. Pinecone API Key (Required)
+### 1. Pinecone API Key and Index Name (Required)
 
-Get your free API key from [Pinecone](https://www.pinecone.io/). Create a `.env` file:
+Get your free API key from [Pinecone](https://www.pinecone.io/). 
+
+Create a `.env` file with **BOTH** of these:
 
 ```env
 PINECONE_API_KEY=your_key_here
+PINECONE_INDEX_NAME=your_index_name_here
 ```
+
+> ⚠️ **IMPORTANT**: Both the API key AND index name are required. The library will auto-create the index if it doesn't exist (768 dimensions, cosine similarity, AWS us-east-1).
 
 ### 2. Ollama with Embedding Model (Required)
 
@@ -27,6 +82,8 @@ Install [Ollama](https://ollama.ai/) and pull the embedding model:
 ```bash
 ollama pull nomic-embed-text:v1.5
 ```
+
+---
 
 ## Quick Start
 
@@ -48,7 +105,9 @@ print(result)
 rag.deleteConvoDB()
 ```
 
-## The Magic: Persistent Memory
+---
+
+## 🔥 The Magic: Persistent Memory
 
 Here's the cool part - **your data persists even if the object is gone**:
 
@@ -64,10 +123,39 @@ result = rag.retrieveFromVectorDB("tell me about important information")
 # Your data is still there! 🎉
 ```
 
-This means you can:
+### ⚠️ CRITICAL: How Memory Persistence Works
+
+To access the **exact same memory** across sessions, you MUST have:
+
+✅ **Same Pinecone index** (`PINECONE_INDEX_NAME` in `.env`)  
+✅ **Same conversation ID** (`convo_id` parameter)
+
+```python
+# These will access THE SAME memory:
+rag1 = NoBrainerRag(convo_id="user_123")  # index: "my-index"
+rag2 = NoBrainerRag(convo_id="user_123")  # index: "my-index"
+# ✅ Same data
+
+# These will have DIFFERENT memory:
+rag1 = NoBrainerRag(convo_id="user_123")  # index: "my-index"
+rag2 = NoBrainerRag(convo_id="user_456")  # index: "my-index"
+# ❌ Different convo_id = different memory
+
+# These will also have DIFFERENT memory:
+rag1 = NoBrainerRag(convo_id="user_123")  # index: "my-index"
+rag2 = NoBrainerRag(convo_id="user_123")  # index: "other-index"
+# ❌ Different index = different memory
+```
+
+**The Rule:** Same index + same convo_id = same memory. Change either and you get a fresh memory space.
+
+**This means you can:**
 - Restart your app without losing conversation history
-- Share conversation data across different parts of your application
+- Share conversation data across different servers/processes
 - Implement true long-term memory for your chatbots
+- Resume conversations after crashes, deploys, or anything else
+
+---
 
 ## Usage
 
@@ -82,7 +170,10 @@ rag.insertIntoVectorDB("Your text here")
 
 ```python
 results = rag.retrieveFromVectorDB("Your query")
-# Returns formatted string with the top relevant chunks
+# Returns formatted string with the top relevant chunks:
+# ---DOCUMENT 1---
+# [content]
+# ---END OF DOCUMENT 1---
 ```
 
 ### Delete Conversation
@@ -91,6 +182,8 @@ results = rag.retrieveFromVectorDB("Your query")
 rag.deleteConvoDB()
 # Returns: "Rag Memory of convo with user_123 id was successfully wiped out"
 ```
+
+---
 
 ## Configuration
 
@@ -112,23 +205,38 @@ rag = NoBrainerRag(
 - **convo_id**: Unique identifier for the conversation (string or int)
 - **chunk_size**: How many characters per chunk (default: 400)
 - **chunk_overlap**: Character overlap between chunks for context (default: 75)
-- **separators**: Preferred split points, in order of priority (default: paragraphs > lines > sentences > words)
+- **separators**: Preferred split points, in order of priority (default: paragraphs → lines → sentences → words)
 - **base_k**: How many chunks to retrieve initially (default: 10)
 - **top_n**: How many chunks to return after reranking (default: 4)
 
+---
+
 ## Under the Hood
 
-NoBrainer RAG uses battle-tested tools so you don't have to:
+NoBrainer RAG uses **battle-tested, production-grade tools** so you don't have to piece them together yourself:
 
-- **Embeddings**: [Ollama](https://ollama.ai/) with `nomic-embed-text:v1.5` (768 dimensions)
-- **Vector Database**: [Pinecone](https://www.pinecone.io/) (serverless, AWS us-east-1)
-- **Chunking**: LangChain's `RecursiveCharacterTextSplitter`
-- **Reranking**: [Flashrank](https://github.com/PrithivirajDamodaran/FlashRank) with `ms-marco-MiniLM-L-12-v2`
-- **Retrieval**: LangChain's compression retriever with contextual reranking
+- **Embeddings**: Ollama with `nomic-embed-text:v1.5` (768 dimensions, state-of-the-art, runs locally)
+- **Chunking**: LangChain's `RecursiveCharacterTextSplitter` - respects semantic boundaries instead of dumb character splits
+- **Reranking**: FlashRank with `ms-marco-MiniLM-L-12-v2` - automatically improves precision on every query
+- **Vector Database**: Pinecone (serverless, AWS us-east-1, production-scale)
+- **Retrieval**: LangChain's contextual compression retriever (retrieves 10 → reranks → returns top 4)
+
+**The pipeline:**
+1. **Text** → RecursiveCharacterTextSplitter breaks it into semantic chunks (respects paragraphs, sentences)
+2. **Chunks** → Nomic embeddings convert to 768-dim vectors (no API costs, runs local)
+3. **Store** → Pinecone with namespace isolation per conversation
+4. **Query** → Retrieve top 10 candidates based on vector similarity
+5. **Rerank** → FlashRank re-scores all 10 and picks the actual best 4 matches
+6. **Return** → Formatted, contextually relevant results ready to use
+
+This isn't a toy setup - **this is the right way to do RAG.** The kind of pipeline you'd spend a week researching and building yourself. Except it's already done.
+
+---
 
 ## Common Use Cases
 
 ### Chatbot with Memory
+
 ```python
 # When user starts chatting
 rag = NoBrainerRag(convo_id=user.id)
@@ -143,6 +251,7 @@ context = rag.retrieveFromVectorDB(user_message)
 ```
 
 ### Document Q&A
+
 ```python
 rag = NoBrainerRag(convo_id="doc_session_456")
 
@@ -156,21 +265,24 @@ answer = rag.retrieveFromVectorDB("What is the main topic?")
 ```
 
 ### Multi-User Application
+
 ```python
 # Each user gets isolated memory
 user1_rag = NoBrainerRag(convo_id=f"user_{user1.id}")
 user2_rag = NoBrainerRag(convo_id=f"user_{user2.id}")
 
-# Their data never mixes
+# Their data never mixes - guaranteed namespace isolation
 ```
+
+---
 
 ## FAQ
 
 **Q: Do I need to keep the same NoBrainerRag object alive?**  
-A: Nope! As long as you use the same `convo_id`, you can create new objects anytime and access the same data.
+A: Nope! As long as you use the same index name and convo_id, you can create new objects anytime and access the same data.
 
 **Q: What happens if I use the same convo_id twice?**  
-A: That's the point! Same ID = same memory. It's a feature, not a bug.
+A: That's the point! Same index + same ID = same memory. It's a feature, not a bug.
 
 **Q: Can I use this in production?**  
 A: Yeah, it's built on production-grade tools (Pinecone, LangChain, Ollama). Just make sure your Pinecone plan can handle your scale.
@@ -184,20 +296,31 @@ A: Currently it uses `nomic-embed-text:v1.5`. Fork it if you need something diff
 **Q: Is my data secure?**  
 A: Data is stored in your Pinecone account. Use their security features + keep your API keys safe.
 
+**Q: Why does the index name matter so much?**  
+A: The index is the top-level container for ALL your data. Conversations live as namespaces inside it. Different index = completely different data store.
+
+---
+
 ## Requirements
 
 - Python 3.8+
-- Pinecone API key
+- Pinecone API key **and index name**
 - Ollama installed locally
 - `nomic-embed-text:v1.5` model pulled in Ollama
+
+---
 
 ## Contributing
 
 Found a bug? Have an idea? PRs welcome! Keep it simple though - the goal is "no brainer", not "all the features".
 
+---
+
 ## License
 
 MIT - do whatever you want with it.
+
+---
 
 ## Support
 
@@ -205,4 +328,4 @@ If this saved you hours of work, star the repo ⭐ and help other devs find it!
 
 ---
 
-Built with ❤️ for developers who just want things to work.
+**Built with ❤️ for developers who just want things to work.**

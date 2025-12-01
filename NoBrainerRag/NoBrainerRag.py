@@ -8,20 +8,25 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.document_compressors import FlashrankRerank
 from langchain_classic.retrievers.contextual_compression import ContextualCompressionRetriever
 from typing import Optional
+import os
 
 load_dotenv()
 
 EmbeddingModel = OllamaEmbeddings(model="nomic-embed-text:v1.5")
 pc = Pinecone()
-index_name = "chatbot-wrapper-project"
-if not pc.has_index(index_name):
+
+INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
+if not INDEX_NAME:
+    raise ValueError("Missing PINECONE_API_KEY environment variable.")
+
+if not pc.has_index(INDEX_NAME):
     pc.create_index(
-        name=index_name,
+        name=INDEX_NAME,
         dimension=768,
         metric="cosine",
         spec=ServerlessSpec(cloud="aws", region="us-east-1"),
     )
-index = pc.Index(index_name)
+index = pc.Index(INDEX_NAME)
 
 class NoBrainerRag:
     def __init__(
