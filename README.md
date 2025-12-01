@@ -31,7 +31,7 @@ ollama pull nomic-embed-text:v1.5
 ## Quick Start
 
 ```python
-from nobrainer_rag import NoBrainerRag
+from NoBrainerRag import NoBrainerRag
 
 # Create a RAG instance for a conversation
 rag = NoBrainerRag(convo_id="user_123")
