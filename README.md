@@ -1,4 +1,5 @@
 [![PyPI version](https://img.shields.io/pypi/v/NoBrainerRag.svg)](https://pypi.org/project/NoBrainerRag/)
+
 # NoBrainer RAG
 
 A dead simple RAG (Retrieval-Augmented Generation) system that just works. Built for developers who want to add memory to their chatbots without overthinking it.
@@ -70,10 +71,13 @@ Create a `.env` file with **BOTH** of these:
 
 ```env
 PINECONE_API_KEY=your_key_here
-PINECONE_INDEX_NAME=your_index_name_here
+PINECONE_INDEX_NAME=your-index-name-here
 ```
 
-> ⚠️ **IMPORTANT**: Both the API key AND index name are required. The library will auto-create the index if it doesn't exist (768 dimensions, cosine similarity, AWS us-east-1).
+> ⚠️ **IMPORTANT**: 
+> - Both the API key AND index name are required
+> - Index name MUST be lowercase with hyphens (e.g., `my-rag-index`, not `My_RAG_Index`)
+> - The library will auto-create the index if it doesn't exist (768 dimensions, cosine similarity, AWS us-east-1)
 
 ### 2. Ollama with Embedding Model (Required)
 
@@ -123,6 +127,33 @@ result = rag.retrieveFromVectorDB("tell me about important information")
 # Your data is still there! 🎉
 ```
 
+### 🗂️ How Pinecone Storage Works
+
+**Index = The Database**  
+Your `PINECONE_INDEX_NAME` is the top-level Pinecone index where ALL your data lives. Think of it as your database.
+
+**Namespace = The Conversation**  
+Your `convo_id` becomes a namespace INSIDE that index. Each conversation is isolated in its own namespace.
+
+```
+Pinecone Index: "my-chatbot-memory"
+├── Namespace: "user_123" (convo_id="user_123")
+│   ├── chunk_1: "Paris is the capital..."
+│   ├── chunk_2: "Python was created..."
+│   └── chunk_3: "Machine learning is..."
+├── Namespace: "user_456" (convo_id="user_456")
+│   ├── chunk_1: "Tokyo is in Japan..."
+│   └── chunk_2: "JavaScript runs in..."
+└── Namespace: "doc_789" (convo_id="doc_789")
+    └── chunk_1: "This document explains..."
+```
+
+**What this means:**
+- One Pinecone index can hold thousands of conversations
+- Each `convo_id` is completely isolated (no data leakage)
+- Same index + same `convo_id` = same memory, always
+- Delete a namespace = only that conversation is wiped
+
 ### ⚠️ CRITICAL: How Memory Persistence Works
 
 To access the **exact same memory** across sessions, you MUST have:
@@ -139,12 +170,12 @@ rag2 = NoBrainerRag(convo_id="user_123")  # index: "my-index"
 # These will have DIFFERENT memory:
 rag1 = NoBrainerRag(convo_id="user_123")  # index: "my-index"
 rag2 = NoBrainerRag(convo_id="user_456")  # index: "my-index"
-# ❌ Different convo_id = different memory
+# ❌ Different convo_id = different namespace = different memory
 
 # These will also have DIFFERENT memory:
 rag1 = NoBrainerRag(convo_id="user_123")  # index: "my-index"
 rag2 = NoBrainerRag(convo_id="user_123")  # index: "other-index"
-# ❌ Different index = different memory
+# ❌ Different index = completely different database = different memory
 ```
 
 **The Rule:** Same index + same convo_id = same memory. Change either and you get a fresh memory space.
@@ -202,7 +233,7 @@ rag = NoBrainerRag(
 
 ### Parameters Explained
 
-- **convo_id**: Unique identifier for the conversation (string or int)
+- **convo_id**: Unique identifier for the conversation (string or int) - becomes a Pinecone namespace
 - **chunk_size**: How many characters per chunk (default: 400)
 - **chunk_overlap**: Character overlap between chunks for context (default: 75)
 - **separators**: Preferred split points, in order of priority (default: paragraphs → lines → sentences → words)
@@ -224,7 +255,7 @@ NoBrainer RAG uses **battle-tested, production-grade tools** so you don't have t
 **The pipeline:**
 1. **Text** → RecursiveCharacterTextSplitter breaks it into semantic chunks (respects paragraphs, sentences)
 2. **Chunks** → Nomic embeddings convert to 768-dim vectors (no API costs, runs local)
-3. **Store** → Pinecone with namespace isolation per conversation
+3. **Store** → Pinecone index with namespace isolation per `convo_id`
 4. **Query** → Retrieve top 10 candidates based on vector similarity
 5. **Rerank** → FlashRank re-scores all 10 and picks the actual best 4 matches
 6. **Return** → Formatted, contextually relevant results ready to use
@@ -267,7 +298,7 @@ answer = rag.retrieveFromVectorDB("What is the main topic?")
 ### Multi-User Application
 
 ```python
-# Each user gets isolated memory
+# Each user gets isolated memory (separate namespace)
 user1_rag = NoBrainerRag(convo_id=f"user_{user1.id}")
 user2_rag = NoBrainerRag(convo_id=f"user_{user2.id}")
 
@@ -297,14 +328,20 @@ A: Currently it uses `nomic-embed-text:v1.5`. Fork it if you need something diff
 A: Data is stored in your Pinecone account. Use their security features + keep your API keys safe.
 
 **Q: Why does the index name matter so much?**  
-A: The index is the top-level container for ALL your data. Conversations live as namespaces inside it. Different index = completely different data store.
+A: The index is the top-level container (the database) for ALL your data. Conversations live as namespaces inside it. Different index = completely different data store.
+
+**Q: What if my index name has uppercase letters?**  
+A: Pinecone doesn't allow uppercase in index names. Use lowercase with hyphens only (e.g., `my-rag-index`). The library will throw an error if you try to use uppercase.
+
+**Q: What's the difference between index and namespace?**  
+A: Index = your database. Namespace = a conversation inside that database. One index can hold many namespaces (conversations).
 
 ---
 
 ## Requirements
 
 - Python 3.8+
-- Pinecone API key **and index name**
+- Pinecone API key **and index name** (lowercase with hyphens only)
 - Ollama installed locally
 - `nomic-embed-text:v1.5` model pulled in Ollama
 
