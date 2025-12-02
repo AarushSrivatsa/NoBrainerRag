@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 from langchain_ollama import OllamaEmbeddings
 from langchain_pinecone import PineconeVectorStore
-from pinecone import Pinecone,ServerlessSpec
+from pinecone import Pinecone, ServerlessSpec
 from langchain_core.documents import Document
 from uuid import uuid4
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -12,81 +12,117 @@ import os
 
 load_dotenv()
 
-EmbeddingModel = OllamaEmbeddings(model="nomic-embed-text:v1.5")
 pc = Pinecone()
-
-INDEX_NAME = os.getenv("PINECONE_INDEX_NAME")
-if not INDEX_NAME:
-    raise ValueError("Missing PINECONE_API_KEY environment variable.")
-
-if not pc.has_index(INDEX_NAME):
-    pc.create_index(
-        name=INDEX_NAME,
-        dimension=768,
-        metric="cosine",
-        spec=ServerlessSpec(cloud="aws", region="us-east-1"),
-    )
-index = pc.Index(INDEX_NAME)
 
 class NoBrainerRag:
     def __init__(
             self,
-            convo_id, 
-            chunk_size: Optional[int]=400, 
+            namespace,
+            index_name: str,
+            embedding_model = None,
+            chunk_size: Optional[int] = 400,
             chunk_overlap: Optional[int] = 75,
-            separators: Optional[list[str]] = ["\n\n","\n",".",","," ",""],
+            separators: Optional[list[str]] = ["\n\n", "\n", ".", ",", " ", ""],
             base_k: Optional[int] = 10,
-            top_n: Optional[int] = 4
-                 ):
-        
+            top_n: Optional[int] = 4,
+            use_reranking: Optional[bool] = True,
+            rerank_model: Optional[str] = "ms-marco-MiniLM-L-12-v2",
+            pinecone_cloud: Optional[str] = "aws",
+            pinecone_region: Optional[str] = "us-east-1",
+            similarity_metric: Optional[str] = "cosine"
+    ):
         """
         Initialize RAG for a conversation.
         
         Args:
-            convo_id: Unique ID for this conversation
+            namespace: Unique namespace for this conversation
+            index_name: Name of the Pinecone index to use
+            embedding_model: Embedding model instance (default: OllamaEmbeddings with nomic-embed-text:v1.5)
             chunk_size: Size of text chunks (default: 400)
             chunk_overlap: Overlap between chunks (default: 75)
             separators: Text separators for chunking (default: ["\n\n","\n",".",","," ",""])
             base_k: Number of chunks to retrieve before reranking (default: 10)
             top_n: Number of chunks to return after reranking (default: 4)
+            use_reranking: Enable FlashRank reranking (default: True)
+            rerank_model: FlashRank model to use (default: "ms-marco-MiniLM-L-12-v2")
+            pinecone_cloud: Pinecone cloud provider (default: "aws")
+            pinecone_region: Pinecone region (default: "us-east-1")
+            similarity_metric: Vector similarity metric (default: "cosine")
         """
         
-        self.convo_id=str(convo_id)
+        self.namespace = str(namespace)
+        self.index_name = index_name
+        self.chunk_size = chunk_size
+        self.chunk_overlap = chunk_overlap
+        self.separators = separators
+        self.base_k = base_k
+        self.top_n = top_n
+        self.use_reranking = use_reranking
+        self.rerank_model = rerank_model
+        
+        # Set default embedding model if none provided
+        self.embedding_model = embedding_model if embedding_model else OllamaEmbeddings(model="nomic-embed-text:v1.5")
+        
+        # Create index if it doesn't exist
+        if not pc.has_index(self.index_name):
+            pc.create_index(
+                name=self.index_name,
+                dimension=768,
+                metric=similarity_metric,
+                spec=ServerlessSpec(cloud=pinecone_cloud, region=pinecone_region),
+            )
+        
+        self.index = pc.Index(self.index_name)
+        
         self.vectorStore = PineconeVectorStore(
-            index=index,
-            embedding=EmbeddingModel,
-            namespace=str(convo_id)
+            index=self.index,
+            embedding=self.embedding_model,
+            namespace=str(namespace)
+        )
+    
+    def add(self, text: str):
+        """Insert text into vector database. Returns number of chunks created."""
+        # Initialize splitter here
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap,
+            separators=self.separators
         )
         
-        self.splitter = RecursiveCharacterTextSplitter(
-            chunk_size=chunk_size,
-            chunk_overlap=chunk_overlap,
-            separators=separators
-        )
-
-        self.compression_retriever = ContextualCompressionRetriever(
-            base_retriever=self.vectorStore.as_retriever(search_kwargs={"k": base_k}),
-            base_compressor=FlashrankRerank(model="ms-marco-MiniLM-L-12-v2",top_n=top_n)
-            )
-
-    def insertIntoVectorDB(self,text: str):
-        """Insert text into vector database. Returns number of chunks created."""
         doc = [Document(page_content=text)]
-        documents = self.splitter.split_documents(doc)
+        documents = splitter.split_documents(doc)
         uuids = [str(uuid4()) for _ in range(len(documents))]
-        self.vectorStore.add_documents(documents=documents,ids=uuids)
-        return f"Insertion Successful {len(documents)} chunks created"
+        self.vectorStore.add_documents(documents=documents, ids=uuids)
+        return f"Insertion Successful: {len(documents)} chunks created"
     
-    def retrieveFromVectorDB(self,query:str):
-        """Retrieve relevant documents for a query. Returns formatted string."""
-        doc_results = self.compression_retriever.invoke(input=query)
+    def query(self, query: str):
+        """
+        Retrieve relevant documents for a query. Returns formatted string.
+        Uses current instance variables for retrieval configuration.
+        
+        Args:
+            query: Search query
+        """
+        # Build retriever fresh each time using current instance variables
+        base_retriever = self.vectorStore.as_retriever(search_kwargs={"k": self.base_k})
+        
+        if self.use_reranking:
+            retriever = ContextualCompressionRetriever(
+                base_retriever=base_retriever,
+                base_compressor=FlashrankRerank(model=self.rerank_model, top_n=self.top_n)
+            )
+        else:
+            retriever = base_retriever
+        
+        doc_results = retriever.invoke(input=query)
+        
         formatted_docs = []
         for i, doc in enumerate(doc_results, 1):
             formatted_docs.append(f"---DOCUMENT {i}---\n{doc.page_content}\n---END OF DOCUMENT {i}---")
         str_result = "\n\n".join(formatted_docs)
         return str_result
-
-    def deleteConvoDB(self):
+    
+    def clear(self):
         """Delete all documents for this conversation."""
-        index.delete(namespace=self.convo_id, delete_all=True)
-        return f"Rag Memory of convo with{self.convo_id} id was successfully wiped out"
+        self.index.delete(namespace=self.namespace, delete_all=True)
+        return f"RAG memory of namespace '{self.namespace}' was successfully wiped out"
